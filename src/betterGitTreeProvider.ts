@@ -18,7 +18,6 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
     private submoduleRelPathsByRepo: Map<string, Set<string>> = new Map();
 
     // Root/header items are kept stable so VS Code preserves their expanded/collapsed UI state
-    // across refreshes (new objects would reset the state).
     private repositoriesHeaderItem: BetterGitItem | null = null;
     private submodulesHeaderItem: BetterGitItem | null = null;
     private otherModulesHeaderItem: BetterGitItem | null = null;
@@ -47,6 +46,10 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
 
     getTreeItem(element: BetterGitItem): vscode.TreeItem {
         return element;
+    }
+
+    getParent(element: BetterGitItem): vscode.ProviderResult<BetterGitItem> {
+        return element.parent;
     }
 
     getChildren(element?: BetterGitItem): Thenable<BetterGitItem[]> {
@@ -78,10 +81,10 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         // Repositories Section
         if (element.contextValue === 'section-repos') {
             if (this.repoData) {
-                const mainRepoPromise = this.createRepoItemWithStatus(this.repoData);
-                return mainRepoPromise.then(mainRepoItem => {
+                // CHANGED: Use recursive build to pre-calculate all deep changes and "bubbles"
+                return this.buildRepoWithStatusRecursive(this.repoData).then(result => {
+                    const mainRepoItem = result.item;
                     const items: BetterGitItem[] = [];
-                    //items.push(new BetterGitItem('Main Repo', vscode.TreeItemCollapsibleState.Expanded, 'section-main-repo', ''));
                     items.push(mainRepoItem);
 
                     if (!this.submodulesHeaderItem) {
@@ -104,7 +107,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
             return Promise.resolve([]);
         }
 
-        // Main Repo container (no children; main repo is a sibling item below the header)
+        // Main Repo container
         if (element.contextValue === 'section-main-repo') {
             return Promise.resolve([]);
         }
@@ -113,7 +116,17 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         if (element.contextValue === 'section-submodules') {
             const submodules = (this.repoData?.Children || []).filter((c: any) => (c.Type || '').toLowerCase() === 'submodule');
             if (!submodules.length) return Promise.resolve([]);
-            return Promise.all(submodules.map((child: any) => this.createRepoItemWithStatus(child)));
+
+            // CHANGED: Retrieve items from cache (populated by the recursive build in section-repos)
+            // If for some reason missing (scan mismatch), fallback to createRepoItemWithStatus
+            const items = submodules.map((child: any) => {
+                const absPath = path.join(this.workspaceRoot!, child.Path || '');
+                const cached = this.repoItemCache.get(this.normalizeAbsPath(absPath));
+                if (cached) return Promise.resolve(cached);
+                return this.createRepoItemWithStatus(child);
+            });
+
+            return Promise.all(items);
         }
 
         // Other modules section (collapsed by default, lazy-loaded)
@@ -132,29 +145,34 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
             const repoPath: string | undefined = element.data?.repoPath;
             const items: BetterGitItem[] = [];
 
-            // Show sub-submodules under their parent submodule (but never under the root repo)
+            // Show sub-submodules under their parent submodule
+            // CHANGED: Use cached items to preserve state/icons
             const isRootRepo = (element.data?.Type || '').toLowerCase() === 'root';
             const submoduleChildren = !isRootRepo && element.data?.Children
                 ? (element.data.Children as any[]).filter(c => (c.Type || '').toLowerCase() === 'submodule')
                 : [];
 
             const submoduleItemsPromise = submoduleChildren.length
-                ? Promise.all(submoduleChildren.map(child => this.createRepoItemWithStatus(child)))
+                ? Promise.all(submoduleChildren.map(child => {
+                    const abs = path.join(this.workspaceRoot!, child.Path);
+                    const cached = this.repoItemCache.get(this.normalizeAbsPath(abs));
+                    return cached ? Promise.resolve(cached) : this.createRepoItemWithStatus(child);
+                }))
                 : Promise.resolve([] as BetterGitItem[]);
 
-                return submoduleItemsPromise.then(subItems => {
-                    items.push(...subItems);
+            return submoduleItemsPromise.then(subItems => {
+                items.push(...subItems);
 
-                    if (repoPath) {
-                        items.push(this.getOrCreateSectionItem(repoPath, 'section-manage', 'Manage Repo', vscode.TreeItemCollapsibleState.Expanded));
-                        items.push(this.getOrCreateSectionItem(repoPath, 'section-remotes', 'Remotes', vscode.TreeItemCollapsibleState.Collapsed));
-                        items.push(this.getOrCreateSectionItem(repoPath, 'section-changes', 'Changes', vscode.TreeItemCollapsibleState.Expanded));
-                        items.push(this.getOrCreateSectionItem(repoPath, 'section-timeline', 'Timeline', vscode.TreeItemCollapsibleState.Collapsed));
-                        items.push(this.getOrCreateSectionItem(repoPath, 'section-archives', 'Archives (Undone)', vscode.TreeItemCollapsibleState.Collapsed));
-                    }
+                if (repoPath) {
+                    items.push(this.getOrCreateSectionItem(repoPath, 'section-manage', 'Manage Repo', vscode.TreeItemCollapsibleState.Expanded));
+                    items.push(this.getOrCreateSectionItem(repoPath, 'section-remotes', 'Remotes', vscode.TreeItemCollapsibleState.Collapsed));
+                    items.push(this.getOrCreateSectionItem(repoPath, 'section-changes', 'Changes', vscode.TreeItemCollapsibleState.Expanded));
+                    items.push(this.getOrCreateSectionItem(repoPath, 'section-timeline', 'Timeline', vscode.TreeItemCollapsibleState.Collapsed));
+                    items.push(this.getOrCreateSectionItem(repoPath, 'section-archives', 'Archives (Undone)', vscode.TreeItemCollapsibleState.Collapsed));
+                }
 
-                    return items;
-                });
+                return items;
+            });
         }
 
         // Remote Groups (scoped to a repo)
@@ -188,26 +206,90 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         return Promise.resolve([]);
     }
 
-    private createRepoItem(data: any, hasActiveChanges: boolean): BetterGitItem {
+    // --- NEW: Recursive Builder for Deep Status & Bubbling Labels ---
+    private async buildRepoWithStatusRecursive(data: any): Promise<{ item: BetterGitItem, totalChangeCount: number }> {
+        const absPath = path.join(this.workspaceRoot!, data.Path || '');
+
+        // 1. Get status of current node (Async)
+        let hasDirectChanges = false;
+        let isPublishPending = false;
+        let hasSubmoduleInChanges = false;
+
+        try {
+            const treeData = await this.getTreeData(absPath);
+            const changes = (treeData && treeData.isInitialized && Array.isArray(treeData.changes)) ? treeData.changes : [];
+            hasDirectChanges = changes.length > 0;
+
+            // Check if one of the changes IS a submodule (gitlink)
+            hasSubmoduleInChanges = changes.some((c: any) => this.isSubmoduleChange(absPath, c.path));
+
+            const aheadBy = typeof treeData?.publish?.aheadBy === 'number' ? treeData.publish.aheadBy : 0;
+            isPublishPending = !!(treeData && treeData.isInitialized && treeData.publish && treeData.publish.isPublishPending) || aheadBy > 0;
+        } catch {
+            // Ignore errors, assume no changes
+        }
+
+        // 2. Process Children (Recursively)
+        const submodules = (data.Children || []).filter((c: any) => (c.Type || '').toLowerCase() === 'submodule');
+
+        // Execute recursive calls in parallel
+        const childResults = await Promise.all(submodules.map((child: any) => this.buildRepoWithStatusRecursive(child)));
+
+        // 3. Aggregate Stats for Bubbling
+        // Calculate total count of changes below this node.
+        // Logic: My Total = (My Direct ? 1 : 0) + Sum(Children's Total)
+        const directCount = hasDirectChanges ? 1 : 0;
+        const childrenTotalCount = childResults.reduce((acc, res) => acc + res.totalChangeCount, 0);
+        const totalChangeCount = directCount + childrenTotalCount;
+
+        // 4. Construct Label
+        // Format: Name [ *] [ **] [ **]
+        let label = data.Name;
+
+        // Add * if self has changes
+        if (hasDirectChanges) {
+            label += ' *';
+        }
+
+        // Add ** for every unit of change contributing from descendants
+        // Note: The user requested 'WebDev * ** **'. This implies accumulating markers.
+        for (let i = 0; i < childrenTotalCount; i++) {
+            label += ' **';
+        }
+
+        // 5. Create Item and Cache It
+        // We pass descendantChangeCount > 0 to getRepoIcon so it can color the root even if only sub-submodules have changes.
+        const item = this.createRepoItemRaw(
+            data,
+            label,
+            hasDirectChanges,
+            isPublishPending,
+            hasSubmoduleInChanges,
+            childrenTotalCount > 0 // Has dirty descendants
+        );
+
+        return { item, totalChangeCount };
+    }
+
+    private createRepoItemRaw(
+        data: any,
+        label: string,
+        hasActiveChanges: boolean,
+        isPublishPending: boolean,
+        hasSubmoduleInChanges: boolean,
+        hasDirtyDescendants: boolean
+    ): BetterGitItem {
         const state = vscode.TreeItemCollapsibleState.Collapsed;
-
-        // Path handling
-        // data.Path is relative to workspace root.
         const absPath = path.join(this.workspaceRoot!, data.Path);
-
-        const isPublishPending = !!data.__publishPending;
-        const label = hasActiveChanges ? `* ${data.Name}` : data.Name;
 
         const key = this.normalizeAbsPath(absPath);
         const existing = this.repoItemCache.get(key);
+
         if (existing) {
             existing.label = label;
             existing.description = data.Path;
-            existing.iconPath = this.getRepoIcon(hasActiveChanges, isPublishPending);
-            existing.data = {
-                ...data,
-                repoPath: absPath
-            };
+            existing.iconPath = this.getRepoIcon(hasActiveChanges, isPublishPending, hasSubmoduleInChanges, hasDirtyDescendants);
+            existing.data = { ...data, repoPath: absPath };
             return existing;
         }
 
@@ -217,32 +299,42 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         });
 
         item.description = data.Path;
-        item.iconPath = this.getRepoIcon(hasActiveChanges, isPublishPending);
+        item.iconPath = this.getRepoIcon(hasActiveChanges, isPublishPending, hasSubmoduleInChanges, hasDirtyDescendants);
 
         this.repoItemCache.set(key, item);
-
         return item;
+    }
+    // -----------------------------------------------------------
+
+    private createRepoItem(data: any, hasActiveChanges: boolean, hasSubmoduleChanges: boolean): BetterGitItem {
+        // Fallback method, forwarded to new Raw method
+        const label = hasActiveChanges ? `* ${data.Name}` : data.Name;
+        return this.createRepoItemRaw(data, label, hasActiveChanges, !!data.__publishPending, hasSubmoduleChanges, false);
     }
 
     private async createRepoItemWithStatus(data: any): Promise<BetterGitItem> {
+        // Legacy method: now mostly a fallback if recursion misses something
         const absPath = path.join(this.workspaceRoot!, data.Path || '');
         try {
             const treeData = await this.getTreeData(absPath);
-            const hasChanges = !!(treeData && treeData.isInitialized && Array.isArray(treeData.changes) && treeData.changes.length > 0);
+            const changes = (treeData && treeData.isInitialized && Array.isArray(treeData.changes)) ? treeData.changes : [];
+            const hasChanges = changes.length > 0;
+            const hasSubmoduleChanges = changes.some((c: any) => this.isSubmoduleChange(absPath, c.path));
             const aheadBy = typeof treeData?.publish?.aheadBy === 'number' ? treeData.publish.aheadBy : 0;
-            // Treat "unpublished commits" as "ahead of upstream" even if isPublishPending isn't set for some reason.
             const publishPending = !!(treeData && treeData.isInitialized && treeData.publish && treeData.publish.isPublishPending) || aheadBy > 0;
-            return this.createRepoItem({ ...data, __publishPending: publishPending }, hasChanges);
+            return this.createRepoItem({ ...data, __publishPending: publishPending }, hasChanges, hasSubmoduleChanges);
         } catch {
-            return this.createRepoItem(data, false);
+            return this.createRepoItem(data, false, false);
         }
     }
 
-    private getRepoIcon(hasActiveChanges: boolean, isPublishPending: boolean): vscode.ThemeIcon {
-        // Rules:
-        // - changes only => normal modified color
-        // - publish pending only => purple
-        // - both => pink
+    /// set repo icon based on status
+    private getRepoIcon(
+        hasActiveChanges: boolean,
+        isPublishPending: boolean,
+        hasSubmoduleChanges: boolean, // This means a direct child submodule is modified in the git index
+        hasDirtyDescendants: boolean = false // This means a submodule deeper down has changes
+    ): vscode.ThemeIcon {
         if (hasActiveChanges && isPublishPending) {
             return new vscode.ThemeIcon('repo', new vscode.ThemeColor('terminal.ansiBrightMagenta'));
         }
@@ -398,7 +490,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
             outputChannel.appendLine(`[INFO] Loading tree data from ${repoPath}`);
 
             // FIX: Add maxBuffer (e.g., 10MB) to handle large JSON outputs
-            cp.execFile(exePath, ['get-tree-data', '--path', repoPath], { 
+            cp.execFile(exePath, ['get-tree-data', '--path', repoPath], {
                 cwd: repoPath,
                 maxBuffer: 1024 * 1024 * 10 // 10 MB
             }, (err, stdout, stderr) => {
@@ -443,11 +535,24 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         return this.getTreeData(repoPath).then(data => {
             if (!data) {
                 const detail = this.treeDataErrorCache.get(repoPath);
+                const items: BetterGitItem[] = [];
+
+                if (detail && detail.includes('is not owned by current user')) {
+                    const errorItem = new BetterGitItem("Error: Repository not owned by current user.", vscode.TreeItemCollapsibleState.None, 'error', '', undefined, { repoPath });
+                    errorItem.tooltip = detail;
+                    items.push(errorItem);
+
+                    const fixItem = new BetterGitItem("Fix: Add to Git Safe Directories", vscode.TreeItemCollapsibleState.None, 'action', '', undefined, { repoPath });
+                    fixItem.command = { command: 'bettersourcecontrol.addSafeDirectory', title: 'Fix', arguments: [repoPath] };
+                    fixItem.iconPath = new vscode.ThemeIcon('shield');
+                    items.push(fixItem);
+                    return items;
+                }
+
                 const label = detail ? `Error loading data: ${detail}` : 'Error loading data';
                 const errorItem = new BetterGitItem(label, vscode.TreeItemCollapsibleState.None, 'error', '', undefined, { repoPath });
                 return [errorItem];
             }
-
             const items: BetterGitItem[] = [];
 
             if (section === 'section-manage') {
@@ -691,7 +796,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
 
         const visit = (node: any) => {
             // Creates / updates cache entry (label without change-star for now)
-            this.createRepoItem(node, false);
+            this.createRepoItem(node, false, false);
             if (node.Children && Array.isArray(node.Children)) {
                 for (const child of node.Children) {
                     visit(child);
@@ -725,7 +830,8 @@ export class BetterGitItem extends vscode.TreeItem {
         public readonly contextValue: string, // Used to identify what type of item this is
         public readonly sha: string,
         public readonly resourceUri?: vscode.Uri,
-        public data?: any
+        public data?: any,
+        public readonly parent?: BetterGitItem
     ) {
         super(label, collapsibleState);
 

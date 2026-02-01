@@ -328,6 +328,12 @@ export function activate(context: vscode.ExtensionContext) {
         const flag = isPublic ? '--private' : '--public';
         await runBetterGitCommand('remote', ['set-meta', remoteName, flag], repoPath, providerPath(context), betterGitProvider);
     });
+
+    // --- ADD SAFE DIRECTORY ---
+    vscode.commands.registerCommand('bettersourcecontrol.addSafeDirectory', async (repoPath: string) => {
+        if (!repoPath) return;
+        await runBetterGitCommand('add-safe-directory', [repoPath], repoPath, context.extensionPath, betterGitProvider);
+    });
 }
 
 function providerPath(context: vscode.ExtensionContext): string {

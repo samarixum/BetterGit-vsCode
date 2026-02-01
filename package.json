@@ -2,9 +2,9 @@
     "name": "bettergitvscode",
     "displayName": "BetterGitVSCode",
     "description": "Simplified, non-destructive version control.",
-    "version": "0.2.3",
+    "version": "0.3.0",
     "engines": {
-        "vscode": "^1.106.1"
+        "vscode": "^1.108.1"
     },
     "publisher": "yggdrasil-au",
     "main": "./out/extension.js",
@@ -118,6 +118,11 @@
                 "command": "bettersourcecontrol.remoteTogglePublic",
                 "title": "Toggle Remote Public/Private",
                 "icon": "$(lock)"
+            },
+            {
+                "command": "bettersourcecontrol.addSafeDirectory",
+                "title": "Add to Git Safe Directories",
+                "icon": "$(shield)"
             }
         ],
         "menus": {
@@ -163,8 +168,8 @@
         }
     },
     "devDependencies": {
-        "@types/node": "^24.10.1",
-        "@types/vscode": "^1.106.1",
+        "@types/node": "^25.1.0",
+        "@types/vscode": "^1.108.1",
         "@vscode/vsce": "^3.7.1",
         "typescript": "^5.9.3"
     }
