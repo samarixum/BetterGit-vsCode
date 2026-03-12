@@ -69,64 +69,35 @@ export function activate(context: vscode.ExtensionContext) {
         const targetPath = repoPath || rootPath;
         if (!targetPath) return;
 
-        let suggestedMessage = "";
+        const inputBox = vscode.window.createInputBox();
+        inputBox.placeholder = 'What did you change? (AI is generating...)';
+        inputBox.busy = true;
+        inputBox.show();
 
-        // -- AI COMMIT MESSAGE GENERATION --
         const cts = new vscode.CancellationTokenSource();
-        try {
-            // 1. Check if the user has an active Copilot/Language Model available
-            const [model] = await vscode.lm.selectChatModels({ family: 'gpt-4o' });
+        let userInterrupted = false;
+        let aiGeneratedMessage = "";
 
-            if (!model) {
-                outputChannel.appendLine('[WARN] No compatible AI models found for commit message generation.');
-            } else {
-                outputChannel.appendLine('[INFO] Generating AI commit message...');
-
-                // 2. Fetch the diff summary from BetterGit CLI
-                const diffOutput = await execBetterGit(['diff'], targetPath, context);
-
-                if (diffOutput && diffOutput.trim().length > 0 && !diffOutput.includes("No changes detected")) {
-                    const messages = [
-                        vscode.LanguageModelChatMessage.User(
-                            "You are a concise commit message generator. Your task is to summarize file changes into a single, professional line. Do not use quotes, backticks, or periods."
-                        ),
-                        vscode.LanguageModelChatMessage.User(
-                            `Summarize these changes:\n\n${diffOutput}`
-                        )
-                    ];
-
-                    // 3. Request the response from the AI model
-                    try {
-                        const chatResponse = await model.sendRequest(messages, {}, cts.token);
-
-                        for await (const fragment of chatResponse.text) {
-                            suggestedMessage += fragment;
-                        }
-
-                        // Clean up the output
-                        suggestedMessage = suggestedMessage.trim().replace(/^["']|["']$/g, '');
-                    } catch (err) {
-                        if (err instanceof vscode.LanguageModelError) {
-                            outputChannel.appendLine(`[ERROR] Language Model Error: ${err.message} (Code: ${err.code})`);
-                        } else {
-                            throw err;
-                        }
-                    }
-                }
+        // Handle user typing: Stop AI if they start typing manually
+        inputBox.onDidChangeValue(v => {
+            if (inputBox.busy && v !== aiGeneratedMessage) {
+                userInterrupted = true;
+                cts.cancel();
+                inputBox.busy = false;
+                inputBox.placeholder = 'What did you change?';
             }
-        } catch (e) {
-            outputChannel.appendLine(`[WARN] AI generation failed or is unavailable: ${e}`);
-        } finally {
-            cts.dispose();
-        }
-        // -- END AI GENERATION --
-
-        const message = await vscode.window.showInputBox({
-            placeHolder: 'What did you change?',
-            value: suggestedMessage,
-            prompt: suggestedMessage ? 'AI suggested a message. Press Enter to use it or edit it.' : ''
         });
-        if (message !== undefined) {
+
+        inputBox.onDidHide(() => {
+            cts.cancel();
+            inputBox.dispose();
+        });
+
+        inputBox.onDidAccept(async () => {
+            const message = inputBox.value;
+            inputBox.hide();
+            if (message === undefined) return;
+
             // Get version info
             let currentVersion = '0.0.0';
             let lastCommitVersion = 'None';
@@ -182,7 +153,100 @@ export function activate(context: vscode.ExtensionContext) {
             if (manualVer) args.push(manualVer);
 
             runBetterGitCommand('save', args, targetPath, providerPath(context), betterGitProvider);
+        });
+
+        // -- AI COMMIT MESSAGE GENERATION --
+        try {
+            // 1. Check if the user has an active Copilot/Language Model available
+            const models = await vscode.lm.selectChatModels({ family: 'gpt-4o' });
+            const model = models[0] || (await vscode.lm.selectChatModels())[0];
+
+            if (!model) {
+                outputChannel.appendLine('[WARN] No compatible AI models found for commit message generation.');
+                inputBox.busy = false;
+                inputBox.placeholder = 'What did you change?';
+            } else {
+                outputChannel.appendLine('[INFO] Generating AI commit message...');
+
+                // 2. Fetch the diff summary from BetterGit CLI
+                const diffOutput = await execBetterGit(['diff'], targetPath, context);
+                outputChannel.appendLine(`[DEBUG] Diff output length: ${diffOutput?.length || 0}`);
+
+                // Filter out the version file from the diff so it doesn't trigger "No changes" if it's the only thing that changed
+                // and doesn't clutter the AI's understanding if it's mixed with other things.
+                // Assuming BetterGit uses a specific file or pattern for versions.
+                // We split by "diff --git" but use a regex to ensure it's at the start of a line to avoid false splits in hunk headers.
+                const diffSegments = diffOutput.split(/^diff --git /m).filter(s => s.trim().length > 0);
+                outputChannel.appendLine(`[DEBUG] Found ${diffSegments.length} diff segments.`);
+
+                const significantSegments = diffSegments.filter((chunk, idx) => {
+                    const isSignificant = !chunk.startsWith('a/.betterGit/project.toml');
+                    outputChannel.appendLine(`[DEBUG] Segment ${idx}: significant=${isSignificant}, preview="${chunk.substring(0, 60).replace(/\r?\n/g, ' ')}"`);
+                    return isSignificant;
+                });
+
+                const significantDiff = significantSegments.length > 0 
+                    ? significantSegments.map(s => 'diff --git ' + s).join('')
+                    : '';
+
+                if (significantDiff.trim().length > 0 && diffOutput.trim() !== "No changes detected") {
+                    outputChannel.appendLine('[DEBUG] Diff output being sent to AI model.');
+                    const messages = [
+                        vscode.LanguageModelChatMessage.User(
+                            "You are a technical git commit message generator. Your sole task is to explain the underlying intent or business logic of the changes in a single, professional line. " +
+                            "CRITICAL CONSTRAINTS: " +
+                            "1. DO NOT mention version numbers or version bumps (this is handled automatically). " +
+                            "2. DO NOT list modified files or state that dependencies were updated just because a version changed. " +
+                            "3. Use the imperative mood (e.g., 'Refine AI generation prompts' not 'Refined'). " +
+                            "4. Be specific about the 'what' and 'why', avoiding generic filler like 'enhance functionality' or 'improve compatibility'. " +
+                            "5. Do not use quotes, backticks, or periods."
+                        ),
+                        vscode.LanguageModelChatMessage.User(
+                            `Analyze this diff and describe the core logic changes ONLY. Ignore version increments:\n\n${significantDiff}`
+                        )
+                    ];
+
+                    outputChannel.appendLine(`[DEBUG] Requesting response from model: ${model.id}`);
+                    // 3. Request the response from the AI model
+                    try {
+                        const chatResponse = await model.sendRequest(messages, {}, cts.token);
+
+                        for await (const fragment of chatResponse.text) {
+                            if (userInterrupted) {
+                                outputChannel.appendLine('[DEBUG] Generation interrupted by user.');
+                                break;
+                            }
+                            aiGeneratedMessage += fragment;
+                            inputBox.value = aiGeneratedMessage.trim().replace(/^["']|["']$/g, '');
+                            outputChannel.appendLine(`[AI] ${fragment}`);
+                        }
+                        outputChannel.appendLine(`[DEBUG] Final generated message: "${aiGeneratedMessage}"`);
+                    } catch (err) {
+                        if (err instanceof vscode.LanguageModelError) {
+                            outputChannel.appendLine(`[ERROR] Language Model Error: ${err.message} (Code: ${err.code})`);
+                        } else if ((err as any).name === 'CanceledError' || (err as any).message?.includes('cancel')) {
+                            outputChannel.appendLine('[INFO] AI generation canceled by user.');
+                        } else {
+                            outputChannel.appendLine(`[ERROR] Unexpected error during AI generation: ${err instanceof Error ? err.message : String(err)}`);
+                            throw err;
+                        }
+                    }
+                } else {
+                    outputChannel.appendLine(`[DEBUG] Diff skipped logic. Significant content empty or "No changes detected".`);
+                    if (diffOutput.includes('.betterGit/project.toml') && significantDiff.trim().length === 0) {
+                        outputChannel.appendLine(`[DEBUG] Only version metadata changes detected. Skipping AI message.`);
+                    }
+                }
+            }
+        } catch (e) {
+            outputChannel.appendLine(`[WARN] AI generation failed or is unavailable: ${e}`);
+        } finally {
+            inputBox.busy = false;
+            inputBox.placeholder = 'What did you change?';
+            cts.dispose();
+            outputChannel.appendLine('[INFO] AI commit message generation process completed.');
         }
+        // -- END AI GENERATION --
     });
 
     // 5. Register "Undo" Command
