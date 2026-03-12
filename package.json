@@ -2,10 +2,13 @@
     "name": "bettergitvscode",
     "displayName": "BetterGitVSCode",
     "description": "Simplified, non-destructive version control.",
-    "version": "0.3.0",
+    "version": "0.3.4",
     "engines": {
-        "vscode": "^1.108.1"
+        "vscode": "^1.110.0"
     },
+    "extensionDependencies": [
+        "github.copilot-chat"
+    ],
     "publisher": "yggdrasil-au",
     "main": "./out/extension.js",
     "repository": {},
@@ -168,9 +171,9 @@
         }
     },
     "devDependencies": {
-        "@types/node": "^25.1.0",
-        "@types/vscode": "^1.108.1",
-        "@vscode/vsce": "^3.7.1",
-        "typescript": "^5.9.3"
+        "@types/node": "25.4.0",
+        "@types/vscode": "1.110.0",
+        "@vscode/vsce": "3.7.1",
+        "typescript": "5.9.3"
     }
 }

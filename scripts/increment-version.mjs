@@ -24,6 +24,7 @@ const pnpmResult = spawnSync('pnpm', ['version', 'patch', '--no-git-tag-version'
 	cwd: extensionRoot,
 	stdio: 'inherit',
 	shell: process.platform === 'win32',
+	env: { ...process.env, NPM_CONFIG_USERCONFIG: '', NPM_CONFIG_GLOBALCONFIG: '' }
 });
 
 if (pnpmResult.status !== 0) {

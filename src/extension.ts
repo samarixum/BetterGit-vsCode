@@ -69,7 +69,63 @@ export function activate(context: vscode.ExtensionContext) {
         const targetPath = repoPath || rootPath;
         if (!targetPath) return;
 
-        const message = await vscode.window.showInputBox({ placeHolder: 'What did you change?' });
+        let suggestedMessage = "";
+
+        // -- AI COMMIT MESSAGE GENERATION --
+        const cts = new vscode.CancellationTokenSource();
+        try {
+            // 1. Check if the user has an active Copilot/Language Model available
+            const [model] = await vscode.lm.selectChatModels({ family: 'gpt-4o' });
+
+            if (!model) {
+                outputChannel.appendLine('[WARN] No compatible AI models found for commit message generation.');
+            } else {
+                outputChannel.appendLine('[INFO] Generating AI commit message...');
+
+                // 2. Fetch the diff summary from BetterGit CLI
+                const diffOutput = await execBetterGit(['diff'], targetPath, context);
+
+                if (diffOutput && diffOutput.trim().length > 0 && !diffOutput.includes("No changes detected")) {
+                    const messages = [
+                        vscode.LanguageModelChatMessage.User(
+                            "You are a concise commit message generator. Your task is to summarize file changes into a single, professional line. Do not use quotes, backticks, or periods."
+                        ),
+                        vscode.LanguageModelChatMessage.User(
+                            `Summarize these changes:\n\n${diffOutput}`
+                        )
+                    ];
+
+                    // 3. Request the response from the AI model
+                    try {
+                        const chatResponse = await model.sendRequest(messages, {}, cts.token);
+
+                        for await (const fragment of chatResponse.text) {
+                            suggestedMessage += fragment;
+                        }
+
+                        // Clean up the output
+                        suggestedMessage = suggestedMessage.trim().replace(/^["']|["']$/g, '');
+                    } catch (err) {
+                        if (err instanceof vscode.LanguageModelError) {
+                            outputChannel.appendLine(`[ERROR] Language Model Error: ${err.message} (Code: ${err.code})`);
+                        } else {
+                            throw err;
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            outputChannel.appendLine(`[WARN] AI generation failed or is unavailable: ${e}`);
+        } finally {
+            cts.dispose();
+        }
+        // -- END AI GENERATION --
+
+        const message = await vscode.window.showInputBox({
+            placeHolder: 'What did you change?',
+            value: suggestedMessage,
+            prompt: suggestedMessage ? 'AI suggested a message. Press Enter to use it or edit it.' : ''
+        });
         if (message !== undefined) {
             // Get version info
             let currentVersion = '0.0.0';
