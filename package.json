@@ -2,7 +2,7 @@
     "name": "bettergitvscode",
     "displayName": "BetterGitVSCode",
     "description": "Simplified, non-destructive version control.",
-    "version": "0.3.21",
+    "version": "0.4.0",
     "engines": {
         "vscode": "^1.110.0"
     },

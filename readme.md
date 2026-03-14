@@ -29,3 +29,6 @@ This extension requires the **BetterGit CLI** to function.
 3.  Run/Debug:
     Press `F5` in VS Code to launch the Extension Development Host.
 
+## Notice
+
+This project was generated entirely with AI.
