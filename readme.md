@@ -8,6 +8,7 @@ A Visual Studio Code extension that provides a simplified interface for Git, pow
 *   **Safe Undo/Redo:** Revert changes without fear of losing code.
 *   **File History:** View and restore previous versions of files.
 *   **Node.js Support:** Automatically initializes and updates `package.json` versions.
+*   **Remote Mirrors:** Add manually managed mirror remotes directly from the Remotes section.
 
 ## Configuration
 
@@ -15,6 +16,10 @@ This extension requires the **BetterGit CLI** to function.
 
 1.  **bettergit.executablePath**: Set this to the absolute path of the `BetterGit.exe` file.
     *   *Example:* `A:\BetterGit\BetterGit.exe`
+
+## Remotes
+
+Use the inline `+` action on the **Remotes** section to create a new mirror remote. The command prompts for the remote name, URL, and group, and defaults the group to `Mirrors`.
 
 ## Development
 

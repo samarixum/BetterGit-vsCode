@@ -2,7 +2,7 @@
     "name": "bettergitvscode",
     "displayName": "BetterGitVSCode",
     "description": "Simplified, non-destructive version control.",
-    "version": "0.4.5",
+    "version": "0.4.7",
     "engines": {
         "vscode": "^1.110.0"
     },
@@ -123,6 +123,11 @@
                 "icon": "$(lock)"
             },
             {
+                "command": "bettersourcecontrol.remoteAdd",
+                "title": "Add Remote Mirror",
+                "icon": "$(add)"
+            },
+            {
                 "command": "bettersourcecontrol.addSafeDirectory",
                 "title": "Add to Git Safe Directories",
                 "icon": "$(shield)"
@@ -165,6 +170,11 @@
                 {
                     "command": "bettersourcecontrol.remoteTogglePublic",
                     "when": "view == BetterSourceControlView && viewItem == remote-item",
+                    "group": "inline"
+                },
+                {
+                    "command": "bettersourcecontrol.remoteAdd",
+                    "when": "view == BetterSourceControlView && viewItem == section-remotes",
                     "group": "inline"
                 }
             ]

@@ -449,6 +449,35 @@ export function activate(context: vscode.ExtensionContext) {
         await runBetterGitCommand('remote', ['set-meta', remoteName, flag], repoPath, providerPath(context), betterGitProvider);
     });
 
+    vscode.commands.registerCommand('bettersourcecontrol.remoteAdd', async (item: BetterGitItem) => {
+        if (!item) return;
+
+        const repoPath = item.data?.repoPath || rootPath;
+        if (!repoPath) return;
+
+        const remoteName = await vscode.window.showInputBox({
+            prompt: 'Enter the name for the new remote mirror',
+            placeHolder: 'Remote Name'
+        });
+        if (!remoteName) return;
+
+        const remoteUrl = await vscode.window.showInputBox({
+            prompt: `Enter the URL for remote '${remoteName}'`,
+            placeHolder: 'Remote URL (https://... or git@...)'
+        });
+        if (!remoteUrl) return;
+
+        const group = await vscode.window.showInputBox({
+            prompt: 'Assign the remote to a group',
+            placeHolder: 'e.g. Mirrors, Private, Public',
+            value: 'Mirrors'
+        });
+
+        if (group === undefined) return;
+
+        await runBetterGitCommand('remote', ['add', remoteName, remoteUrl, '--group', group || 'Mirrors'], repoPath, providerPath(context), betterGitProvider);
+    });
+
     // --- ADD SAFE DIRECTORY ---
     vscode.commands.registerCommand('bettersourcecontrol.addSafeDirectory', async (repoPath: string) => {
         if (!repoPath) return;
