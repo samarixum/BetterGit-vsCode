@@ -21,6 +21,8 @@ This extension requires the **BetterGit CLI** to function.
 
 Use the inline `+` action on the **Remotes** section to create a new mirror remote. The command prompts for the remote name, URL, and group, and defaults the group to `Mirrors`.
 
+Use the inline branch action on a remote row to change the branch that mirror publishes to.
+
 ## Development
 
 1.  Install dependencies:

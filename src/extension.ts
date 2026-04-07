@@ -449,9 +449,26 @@ export function activate(context: vscode.ExtensionContext) {
         await runBetterGitCommand('remote', ['set-meta', remoteName, flag], repoPath, providerPath(context), betterGitProvider);
     });
 
-    vscode.commands.registerCommand('bettersourcecontrol.remoteAdd', async (item: BetterGitItem) => {
+    vscode.commands.registerCommand('bettersourcecontrol.remoteSetBranch', async (item: BetterGitItem) => {
         if (!item) return;
 
+        const repoPath = item.data?.repoPath || rootPath;
+        const remoteName = item.data?.remoteName || item.label;
+        if (!repoPath || !remoteName) return;
+
+        const branch = await vscode.window.showInputBox({
+            prompt: 'Set the branch this remote should publish to',
+            placeHolder: 'e.g. main',
+            value: String(item.data?.branch || '')
+        });
+
+        if (branch === undefined) return;
+
+        await runBetterGitCommand('remote', ['set-meta', remoteName, '--branch', branch], repoPath, providerPath(context), betterGitProvider);
+    });
+
+    vscode.commands.registerCommand('bettersourcecontrol.remoteAdd', async (item: BetterGitItem) => {
+        if (!item) return;
         const repoPath = item.data?.repoPath || rootPath;
         if (!repoPath) return;
 
@@ -467,6 +484,12 @@ export function activate(context: vscode.ExtensionContext) {
         });
         if (!remoteUrl) return;
 
+        const branch = await vscode.window.showInputBox({
+            prompt: 'Enter the branch this mirror should publish to',
+            placeHolder: 'e.g. main'
+        });
+        if (branch === undefined) return;
+
         const group = await vscode.window.showInputBox({
             prompt: 'Assign the remote to a group',
             placeHolder: 'e.g. Mirrors, Private, Public',
@@ -475,7 +498,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         if (group === undefined) return;
 
-        await runBetterGitCommand('remote', ['add', remoteName, remoteUrl, '--group', group || 'Mirrors'], repoPath, providerPath(context), betterGitProvider);
+        await runBetterGitCommand('remote', ['add', remoteName, remoteUrl, '--group', group || 'Mirrors', '--branch', branch], repoPath, providerPath(context), betterGitProvider);
     });
 
     // --- ADD SAFE DIRECTORY ---

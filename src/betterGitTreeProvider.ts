@@ -724,6 +724,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
     private createRemoteItem(repoPath: string, remote: any): BetterGitItem {
         const name = String(remote?.name || 'unknown');
         const provider = String(remote?.provider || 'other');
+        const branch = String(remote?.branch || '');
         const group = String(remote?.group || 'Ungrouped');
         const isPublic = !!remote?.isPublic;
         const isMisconfigured = !!remote?.isMisconfigured;
@@ -732,7 +733,8 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
 
         const pubLabel = isPublic ? 'Public' : 'Private';
         const status = isMisconfigured ? 'Misconfigured' : (hasMetadata ? provider : 'Unmanaged');
-        const description = url ? `${status} • ${pubLabel}` : `${status} • ${pubLabel} • (no url)`;
+        const branchLabel = branch || 'Current branch';
+        const description = url ? `${status} • ${pubLabel} • ${branchLabel}` : `${status} • ${pubLabel} • ${branchLabel} • (no url)`;
 
         const item = new BetterGitItem(
             name,
@@ -740,13 +742,13 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
             'remote-item',
             '',
             undefined,
-            { repoPath, remoteName: name, provider, group, isPublic, isMisconfigured, url }
+            { repoPath, remoteName: name, provider, group, branch, isPublic, isMisconfigured, url }
         );
 
         item.description = description;
         item.tooltip = url
-            ? `${name}\n${url}\nGroup: ${group}\nProvider: ${provider}\nVisibility: ${pubLabel}\nMetadata: ${hasMetadata ? 'Yes' : 'No'}`
-            : `${name}\nGroup: ${group}\nProvider: ${provider}\nVisibility: ${pubLabel}\nMetadata: ${hasMetadata ? 'Yes' : 'No'}`;
+            ? `${name}\n${url}\nGroup: ${group}\nProvider: ${provider}\nBranch: ${branchLabel}\nVisibility: ${pubLabel}\nMetadata: ${hasMetadata ? 'Yes' : 'No'}`
+            : `${name}\nGroup: ${group}\nProvider: ${provider}\nBranch: ${branchLabel}\nVisibility: ${pubLabel}\nMetadata: ${hasMetadata ? 'Yes' : 'No'}`;
         item.iconPath = isMisconfigured
             ? new vscode.ThemeIcon('warning', new vscode.ThemeColor('terminal.ansiYellow'))
             : new vscode.ThemeIcon('cloud');
