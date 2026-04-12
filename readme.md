@@ -10,6 +10,12 @@ A Visual Studio Code extension that provides a simplified interface for Git, pow
 *   **Web Project Support:** Automatically initializes and updates `package.json`, `deno.json`, and `deno.jsonc` versions.
 *   **Remote Mirrors:** Add manually managed mirror remotes directly from the Remotes section.
 
+## Build Pipeline
+
+*   TypeScript is bundled with Deno into `out/extension.js`.
+*   `pnpm` is only used for VSIX packaging and installing the extension into VS Code.
+*   The Deno build config lives in `deno.jsonc`, which also provides the extension-local tasks.
+
 ## Configuration
 
 This extension requires the **BetterGit CLI** to function.

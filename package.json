@@ -2,7 +2,8 @@
     "name": "bettergitvscode",
     "displayName": "BetterGitVSCode",
     "description": "Simplified, non-destructive version control.",
-    "version": "0.4.13",
+    "version": "0.4.14",
+    "type": "module",
     "engines": {
         "vscode": "^1.110.0"
     },
@@ -13,10 +14,11 @@
     "main": "./out/extension.js",
     "repository": {},
     "scripts": {
-        "production-1": "pnpm run build && pnpm run package && pnpm run uninstall-extension && pnpm run install-extension",
-        "production": "pnpm run build && pnpm run package",
+        "production-1": "deno task production-1",
+        "production": "deno task production",
         "publish-public": "vsce publish --pat ${PAT} --pre-release",
-        "build": "tsc -p ./",
+        "build": "deno task build",
+        "check": "deno task check",
         "package": "vsce package --pre-release -o ./build/",
         "uninstall-extension": "code --uninstall-extension yggdrasil-au.bettergitvscode",
         "install-extension": "node -e \"require('child_process').execSync('code --install-extension ./build/bettergitvscode-' + require('./package.json').version + '.vsix', {stdio: 'inherit'})\""
