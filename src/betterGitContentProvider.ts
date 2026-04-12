@@ -1,10 +1,8 @@
 import * as vscode from 'vscode';
-import * as cp from 'child_process';
-import * as path from 'path';
-import { outputChannel } from './extension';
+import * as cp from 'node:child_process';
+import { outputChannel } from './extension.ts';
 
 export class BetterGitContentProvider implements vscode.TextDocumentContentProvider {
-    // Scheme: bettergit://sha/path/to/file
 
     constructor(private extensionPath: string, private workspaceRoot: string | undefined) {}
 
@@ -36,7 +34,7 @@ export class BetterGitContentProvider implements vscode.TextDocumentContentProvi
             }
 
             const config = vscode.workspace.getConfiguration('bettergit');
-            let exePath = config.get<string>('executablePath');
+            const exePath = config.get<string>('executablePath');
 
             if (!exePath) {
                 resolve("Error: BetterGit executable path not configured.");
@@ -44,7 +42,7 @@ export class BetterGitContentProvider implements vscode.TextDocumentContentProvi
             }
 
             outputChannel.appendLine(`[INFO] Loading file content: ${relPath} from ${sha}`);
-            cp.execFile(exePath, ['cat-file', sha, relPath], { cwd: repoPath }, (err, stdout) => {
+            cp.execFile(exePath, ['cat-file', sha, relPath], { cwd: repoPath, encoding: 'utf8' }, (err: cp.ExecFileException | null, stdout: string) => {
                 if (err) {
                     outputChannel.appendLine(`[INFO] File not found in ${sha}: ${relPath} (new file)`);
                     resolve(""); // Return empty if error (e.g. new file)

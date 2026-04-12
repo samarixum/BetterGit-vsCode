@@ -1,13 +1,22 @@
+// deno-lint-ignore-file no-explicit-any
 import * as vscode from 'vscode';
-import * as cp from 'child_process';
-import * as path from 'path';
-import * as fs from 'fs';
-import { outputChannel } from './extension';
+import * as cp from 'node:child_process';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
+import { outputChannel } from './extension.ts';
+
+const ThemeIconCtor = vscode.ThemeIcon as unknown as {
+    new(id: string, color?: vscode.ThemeColor): vscode.ThemeIcon;
+};
+
+function createThemeIcon(id: string, color?: vscode.ThemeColor): vscode.ThemeIcon {
+    return new ThemeIconCtor(id, color);
+}
 
 export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitItem> {
 
-    private _onDidChangeTreeData: vscode.EventEmitter<BetterGitItem | undefined | null | void> = new vscode.EventEmitter<BetterGitItem | undefined | null | void>();
-    readonly onDidChangeTreeData: vscode.Event<BetterGitItem | undefined | null | void> = this._onDidChangeTreeData.event;
+    private _onDidChangeTreeData: vscode.EventEmitter<BetterGitItem | undefined | null> = new vscode.EventEmitter<BetterGitItem | undefined | null>();
+    readonly onDidChangeTreeData: vscode.Event<BetterGitItem | undefined | null> = this._onDidChangeTreeData.event;
 
     private repoData: any = null;
     private treeDataCache: Map<string, any> = new Map();
@@ -336,15 +345,21 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         hasDirtyDescendants: boolean = false // This means a submodule deeper down has changes
     ): vscode.ThemeIcon {
         if (hasActiveChanges && isPublishPending) {
-            return new vscode.ThemeIcon('repo', new vscode.ThemeColor('terminal.ansiBrightMagenta'));
+            return createThemeIcon('repo', new vscode.ThemeColor('terminal.ansiBrightMagenta'));
         }
         if (hasActiveChanges) {
-            return new vscode.ThemeIcon('repo', new vscode.ThemeColor('gitDecoration.modifiedResourceForeground'));
+            return createThemeIcon('repo', new vscode.ThemeColor('gitDecoration.modifiedResourceForeground'));
         }
         if (isPublishPending) {
-            return new vscode.ThemeIcon('repo', new vscode.ThemeColor('terminal.ansiMagenta'));
+            return createThemeIcon('repo', new vscode.ThemeColor('terminal.ansiMagenta'));
         }
-        return new vscode.ThemeIcon('repo');
+        if (hasDirtyDescendants) {
+            return createThemeIcon('repo', new vscode.ThemeColor('terminal.ansiYellow'));
+        }
+        if (hasSubmoduleChanges) {
+            return createThemeIcon('repo', new vscode.ThemeColor('terminal.ansiCyan'));
+        }
+        return createThemeIcon('repo');
     }
 
     private getPublishTintColor(hasActiveChanges: boolean, isPublishPending: boolean): vscode.ThemeColor | undefined {
@@ -544,7 +559,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
 
                     const fixItem = new BetterGitItem("Fix: Add to Git Safe Directories", vscode.TreeItemCollapsibleState.None, 'action', '', undefined, { repoPath });
                     fixItem.command = { command: 'bettersourcecontrol.addSafeDirectory', title: 'Fix', arguments: [repoPath] };
-                    fixItem.iconPath = new vscode.ThemeIcon('shield');
+                    fixItem.iconPath = createThemeIcon('shield');
                     items.push(fixItem);
                     return items;
                 }
@@ -575,30 +590,26 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
 
                     const saveItem = new BetterGitItem("Save Changes", vscode.TreeItemCollapsibleState.None, 'action', '');
                     saveItem.command = { command: 'bettersourcecontrol.save', title: 'Save', arguments: [repoPath] };
-                    // Only tint Save when there are unsaved changes.
                     saveItem.iconPath = hasActiveChanges
-                        ? new vscode.ThemeIcon('save', new vscode.ThemeColor('gitDecoration.modifiedResourceForeground'))
-                        : new vscode.ThemeIcon('save');
+                        ? createThemeIcon('save', new vscode.ThemeColor('gitDecoration.modifiedResourceForeground'))
+                        : createThemeIcon('save');
                     items.push(saveItem);
 
                     const undoItem = new BetterGitItem("Undo Last Save", vscode.TreeItemCollapsibleState.None, 'action', '');
                     undoItem.command = { command: 'bettersourcecontrol.undo', title: 'Undo', arguments: [repoPath] };
-                    // undo icon, no colour
-                    undoItem.iconPath = new vscode.ThemeIcon('arrow-left');
+                    undoItem.iconPath = createThemeIcon('arrow-left');
                     items.push(undoItem);
 
                     const redoItem = new BetterGitItem("Redo Last Undo", vscode.TreeItemCollapsibleState.None, 'action', '');
                     redoItem.command = { command: 'bettersourcecontrol.redo', title: 'Redo', arguments: [repoPath] };
-                    // redo icon, no colour
-                    redoItem.iconPath = new vscode.ThemeIcon('arrow-right');
+                    redoItem.iconPath = createThemeIcon('arrow-right');
                     items.push(redoItem);
 
                     const publishItem = new BetterGitItem("Publish (Push)", vscode.TreeItemCollapsibleState.None, 'action', '');
                     publishItem.command = { command: 'bettersourcecontrol.publish', title: 'Publish', arguments: [repoPath] };
-                    // cloud upload icon; tint only when publish is pending (purple), or pending+changes (pink)
-                    const publishTint = this.getPublishTintColor(hasActiveChanges, isPublishPending);
-                    // set icon with tint if applicable else default icon
-                    publishItem.iconPath = publishTint ? new vscode.ThemeIcon('cloud-upload', publishTint) : new vscode.ThemeIcon('cloud-upload');
+                    publishItem.iconPath = isPublishPending
+                        ? createThemeIcon('cloud-upload', this.getPublishTintColor(hasActiveChanges, isPublishPending))
+                        : createThemeIcon('cloud-upload');
                     items.push(publishItem);
 
                     const channelItem = new BetterGitItem("Set Release Channel", vscode.TreeItemCollapsibleState.None, 'action', '');
@@ -680,7 +691,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                         { repoPath, groupName, remotes: groupRemotes }
                     );
                     groupItem.description = `${groupRemotes.length}`;
-                    groupItem.iconPath = new vscode.ThemeIcon('folder');
+                    groupItem.iconPath = createThemeIcon('folder');
                     items.push(groupItem);
                 }
 
@@ -699,8 +710,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
 
                     // Highlight local-only commits (not yet pushed/published).
                     if (aheadBy > 0 && index < aheadBy) {
-                        const tint = this.getPublishTintColor(hasActiveChanges, isPublishPending);
-                        item.iconPath = tint ? new vscode.ThemeIcon('git-commit', tint) : new vscode.ThemeIcon('git-commit');
+                        item.iconPath = createThemeIcon('git-commit', new vscode.ThemeColor('gitDecoration.modifiedResourceForeground'));
                         item.description = 'Local only (not published)';
                         item.tooltip = `ID: ${commit.id}\nLocal only (not published)`;
                     }
@@ -717,6 +727,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                     const label = `[${branch.version}] ${branch.message}`;
                     const item = new BetterGitItem(label, vscode.TreeItemCollapsibleState.None, 'archive-item', branch.sha, undefined, { repoPath });
                     item.description = branch.name;
+                    item.iconPath = createThemeIcon('history');
                     items.push(item);
                 });
             }
@@ -753,9 +764,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         item.tooltip = url
             ? `${name}\n${url}\nGroup: ${group}\nProvider: ${provider}\nBranch: ${branchLabel}\nVisibility: ${pubLabel}\nMetadata: ${hasMetadata ? 'Yes' : 'No'}`
             : `${name}\nGroup: ${group}\nProvider: ${provider}\nBranch: ${branchLabel}\nVisibility: ${pubLabel}\nMetadata: ${hasMetadata ? 'Yes' : 'No'}`;
-        item.iconPath = isMisconfigured
-            ? new vscode.ThemeIcon('warning', new vscode.ThemeColor('terminal.ansiYellow'))
-            : new vscode.ThemeIcon('cloud');
+        item.iconPath = createThemeIcon('cloud');
 
         return item;
     }
@@ -831,33 +840,27 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
 
 export class BetterGitItem extends vscode.TreeItem {
     constructor(
-        public label: string,
-        public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-        public readonly contextValue: string, // Used to identify what type of item this is
+        label: string,
+        collapsibleState: vscode.TreeItemCollapsibleState,
+        contextValue: string, // Used to identify what type of item this is
         public readonly sha: string,
-        public readonly resourceUri?: vscode.Uri,
+        public override resourceUri?: vscode.Uri,
         public data?: any,
         public readonly parent?: BetterGitItem
     ) {
         super(label, collapsibleState);
-
-        if (resourceUri) {
-            this.resourceUri = resourceUri;
+        this.label = label;
+        this.collapsibleState = collapsibleState;
+        this.contextValue = contextValue;
+        if (contextValue === 'file' && !resourceUri) {
+            this.iconPath = vscode.ThemeIcon.File;
         }
-
-        // Add icons based on type
-        // If it's a file and we have a resourceUri, let VS Code handle the icon (ThemeIcon.File is default behavior for resourceUri)
-        if (contextValue === 'file' && !resourceUri) this.iconPath = new vscode.ThemeIcon('file');
-        if (contextValue === 'commit') this.iconPath = new vscode.ThemeIcon('git-commit');
-        if (contextValue === 'archive-item') this.iconPath = new vscode.ThemeIcon('history');
-        if (contextValue === 'settings') this.iconPath = new vscode.ThemeIcon('settings-gear');
-        if (contextValue === 'info') this.iconPath = new vscode.ThemeIcon('info');
-        if (contextValue === 'error') this.iconPath = new vscode.ThemeIcon('error');
-        if (contextValue === 'action') this.iconPath = new vscode.ThemeIcon('play');
-        if (contextValue === 'repo-item') this.iconPath = new vscode.ThemeIcon('repo');
-        if (contextValue === 'submodule-change') this.iconPath = new vscode.ThemeIcon('repo', new vscode.ThemeColor('gitDecoration.submoduleResourceForeground'));
-        if (contextValue === 'remote-item') this.iconPath = new vscode.ThemeIcon('cloud');
-        if (contextValue === 'remote-group') this.iconPath = new vscode.ThemeIcon('folder');
+        if (contextValue === 'repo-item' || contextValue === 'remote-group') {
+            this.iconPath = vscode.ThemeIcon.Folder;
+        }
+        if (contextValue === 'submodule-change' && !resourceUri) {
+            this.iconPath = vscode.ThemeIcon.File;
+        }
 
         this.tooltip = sha ? `ID: ${sha}` : label;
     }

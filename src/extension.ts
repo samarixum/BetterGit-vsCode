@@ -1,13 +1,43 @@
 import * as vscode from 'vscode';
-import * as cp from 'child_process';
-import * as path from 'path';
-import { BetterGitTreeProvider, BetterGitItem } from './betterGitTreeProvider';
-import { BetterGitContentProvider } from './betterGitContentProvider';
+import * as cp from 'node:child_process';
+import * as path from 'node:path';
+import { BetterGitTreeProvider, type BetterGitItem } from './betterGitTreeProvider.ts';
+import { BetterGitContentProvider } from './betterGitContentProvider.ts';
 
 // Create a global output channel for BetterGit logging
 export const outputChannel = vscode.window.createOutputChannel('BetterGit');
 
 let betterGitTreeView: vscode.TreeView<BetterGitItem> | undefined;
+
+type LanguageModelChatModelLike = {
+    id: string;
+    sendRequest(messages: unknown[], options: Record<string, unknown>, token: vscode.CancellationToken): Promise<{
+        text: AsyncIterable<string>;
+    }>;
+};
+
+type VscodeLanguageModelApi = {
+    selectChatModels(options?: unknown): Promise<LanguageModelChatModelLike[]>;
+};
+
+type VscodeWithLanguageModel = typeof vscode & {
+    lm?: VscodeLanguageModelApi;
+};
+
+type VscodeWithLanguageModelStatics = typeof vscode & {
+    LanguageModelChatMessage: {
+        User(content: string): unknown;
+    };
+    LanguageModelError: new (...args: never[]) => Error;
+};
+
+function delay(milliseconds: number): Promise<void> {
+    return new Promise(resolve => {
+        (globalThis as typeof globalThis & {
+            setTimeout(handler: () => void, timeout: number): number;
+        }).setTimeout(resolve, milliseconds);
+    });
+}
 
 const expandedRepoPaths = new Set<string>();
 const expandedSectionKeys = new Set<string>();
@@ -30,9 +60,11 @@ export function activate(context: vscode.ExtensionContext) {
     const betterGitProvider = new BetterGitTreeProvider(rootPath, context.extensionPath);
 
     // 2. Create the Tree View (needed for reveal/expand)
+    // The runtime TreeView stays strongly typed as BetterGitItem; the cast keeps the Deno
+    // checker aligned with the VS Code declaration shape used by the bundled extension.
     betterGitTreeView = vscode.window.createTreeView('BetterSourceControlView', {
         treeDataProvider: betterGitProvider
-    });
+    }) as vscode.TreeView<BetterGitItem>;
     context.subscriptions.push(betterGitTreeView);
 
     // Track expanded/collapsed state so refresh doesn't collapse the view.
@@ -106,7 +138,7 @@ export function activate(context: vscode.ExtensionContext) {
                 const info = JSON.parse(output);
                 currentVersion = info.currentVersion || '0.0.0';
                 lastCommitVersion = info.lastCommitVersion || 'None';
-            } catch (e) {
+            } catch (_e) {
                 // ignore, fallback to defaults
             }
 
@@ -158,8 +190,9 @@ export function activate(context: vscode.ExtensionContext) {
         // -- AI COMMIT MESSAGE GENERATION --
         try {
             // 1. Check if the user has an active Copilot/Language Model available
-            const models = await vscode.lm.selectChatModels({ family: 'gpt-4o' });
-            const model = models[0] || (await vscode.lm.selectChatModels())[0];
+            const lmApi = (vscode as VscodeWithLanguageModel).lm;
+            const models = lmApi ? await lmApi.selectChatModels({ vendor: 'copilot' }) : [];
+            const model = models[0];
 
             if (!model) {
                 outputChannel.appendLine('[WARN] No compatible AI models found for commit message generation.');
@@ -191,8 +224,9 @@ export function activate(context: vscode.ExtensionContext) {
 
                 if (significantDiff.trim().length > 0 && diffOutput.trim() !== "No changes detected") {
                     outputChannel.appendLine('[DEBUG] Diff output being sent to AI model.');
+                    const vscodeLanguageModel = vscode as VscodeWithLanguageModelStatics;
                     const messages = [
-                        vscode.LanguageModelChatMessage.User(
+                        vscodeLanguageModel.LanguageModelChatMessage.User(
                             "You are a technical git commit message generator. Your sole task is to explain the underlying intent or business logic of the changes in a single, professional line. " +
                             "CRITICAL CONSTRAINTS: " +
                             "1. DO NOT mention version numbers or version bumps (this is handled automatically). " +
@@ -201,7 +235,7 @@ export function activate(context: vscode.ExtensionContext) {
                             "4. Be specific about the 'what' and 'why', avoiding generic filler like 'enhance functionality' or 'improve compatibility'. " +
                             "5. Do not use quotes, backticks, or periods."
                         ),
-                        vscode.LanguageModelChatMessage.User(
+                        vscodeLanguageModel.LanguageModelChatMessage.User(
                             `Analyze this diff and describe the core logic changes ONLY. Ignore version increments:\n\n${significantDiff}`
                         )
                     ];
@@ -222,13 +256,20 @@ export function activate(context: vscode.ExtensionContext) {
                         }
                         outputChannel.appendLine(`[DEBUG] Final generated message: "${aiGeneratedMessage}"`);
                     } catch (err) {
-                        if (err instanceof vscode.LanguageModelError) {
-                            outputChannel.appendLine(`[ERROR] Language Model Error: ${err.message} (Code: ${err.code})`);
-                        } else if ((err as any).name === 'CanceledError' || (err as any).message?.includes('cancel')) {
-                            outputChannel.appendLine('[INFO] AI generation canceled by user.');
+                        if (err instanceof vscodeLanguageModel.LanguageModelError) {
+                            const languageModelError = err as Error & { code?: string | number };
+                            outputChannel.appendLine(`[ERROR] Language Model Error: ${languageModelError.message} (Code: ${languageModelError.code})`);
                         } else {
-                            outputChannel.appendLine(`[ERROR] Unexpected error during AI generation: ${err instanceof Error ? err.message : String(err)}`);
-                            throw err;
+                            const errorRecord = err as Record<string, unknown>;
+                            const errorName = typeof errorRecord.name === 'string' ? errorRecord.name : '';
+                            const errorMessage = typeof errorRecord.message === 'string' ? errorRecord.message : '';
+
+                            if (errorName === 'CanceledError' || errorMessage.toLowerCase().includes('cancel')) {
+                                outputChannel.appendLine('[INFO] AI generation canceled by user.');
+                            } else {
+                                outputChannel.appendLine(`[ERROR] Unexpected error during AI generation: ${err instanceof Error ? err.message : String(err)}`);
+                                throw err;
+                            }
                         }
                     }
                 } else {
@@ -238,8 +279,8 @@ export function activate(context: vscode.ExtensionContext) {
                     }
                 }
             }
-        } catch (e) {
-            outputChannel.appendLine(`[WARN] AI generation failed or is unavailable: ${e}`);
+        } catch (_e) {
+            outputChannel.appendLine(`[WARN] AI generation failed or is unavailable: ${_e}`);
         } finally {
             inputBox.busy = false;
             inputBox.placeholder = 'What did you change?';
@@ -571,7 +612,7 @@ async function refreshTreePreservingUiState(provider: BetterGitTreeProvider): Pr
 }
 
 // Helper to run your C# EXE and get stdout
-function execBetterGit(args: string[], cwd: string, context: vscode.ExtensionContext): Promise<string> {
+function execBetterGit(args: string[], cwd: string, _context: vscode.ExtensionContext): Promise<string> {
     const config = vscode.workspace.getConfiguration('bettergit');
     let exePath = config.get<string>('executablePath');
 
@@ -596,7 +637,7 @@ function execBetterGit(args: string[], cwd: string, context: vscode.ExtensionCon
 }
 
 // Helper to run your C# EXE
-function runBetterGitCommand(command: string, args: string[], cwd: string | undefined, extPath: string, provider: BetterGitTreeProvider): Promise<void> {
+function runBetterGitCommand(command: string, args: string[], cwd: string | undefined, _extPath: string, provider: BetterGitTreeProvider): Promise<void> {
     if (!cwd) {
         // If running init from a blank window, we might not have a CWD, so we don't pass one to exec
         if (command !== 'init') return Promise.resolve();
@@ -619,8 +660,6 @@ function runBetterGitCommand(command: string, args: string[], cwd: string | unde
     // Log the command being executed
     outputChannel.appendLine(`[${new Date().toISOString()}] Running: ${command} ${args.join(' ')}${cwd ? ` (in ${cwd})` : ''}`);
 
-    // Fix: Ensure we don't double quote if args already has quotes, but here args is constructed by us.
-    // The command string needs to be carefully constructed.
     return new Promise<void>((resolve) => {
         cp.execFile(exePath, [command, ...args], { cwd: cwd }, async (err, stdout, stderr) => {
             try {
@@ -656,7 +695,7 @@ function runBetterGitCommand(command: string, args: string[], cwd: string | unde
     });
 }
 
-function runBetterGitCommandStreaming(command: string, args: string[], cwd: string | undefined, extPath: string, provider: BetterGitTreeProvider): Promise<void> {
+function runBetterGitCommandStreaming(command: string, args: string[], cwd: string | undefined, _extPath: string, provider: BetterGitTreeProvider): Promise<void> {
     if (!cwd) {
         if (command !== 'init') return Promise.resolve();
     }
@@ -748,7 +787,7 @@ async function restoreExpandedState(provider: BetterGitTreeProvider, repoPaths: 
     if (!betterGitTreeView) return;
 
     // Defer slightly so the provider has a chance to re-scan and re-materialize nodes.
-    await new Promise(resolve => setTimeout(resolve, 75));
+    await delay(75);
 
     // Restore repo expansions first, then section expansions.
     for (const repoKey of repoPaths) {

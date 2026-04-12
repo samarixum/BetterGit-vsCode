@@ -1,8 +1,9 @@
 {
     "tasks": {
+        "check": "deno check ./src/*.ts",
         "build": "deno bundle --check --unstable-bare-node-builtins --external=vscode --sourcemap=external --output ./out/extension.js ./src/extension.ts",
-        "check": "deno check ./src/extension.ts",
-        "production": "deno task build && pnpm run package",
+        //"check": "deno check ./src/extension.ts",
+        "production": "deno task check && deno task build && pnpm run package",
         "production-1": "deno task build && pnpm run package && pnpm run uninstall-extension && pnpm run install-extension"
     },
     "compilerOptions": {
