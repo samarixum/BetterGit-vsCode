@@ -1,0 +1,20 @@
+{
+    "tasks": {
+        // install deps using pnpm
+        "install": "pnpm install",
+        // old prod script that builds the extension, packages it, uninstalls the old version and installs the new version.
+        "production-1": "deno task build && deno task package && deno task uninstall-extension && deno task install-extension",
+        // build the extension and package it, but don't install it
+        "production": "deno task build && deno task package",
+        // unused publish to marketplace, requires PAT env var to be set to a Personal Access Token with the "Marketplace (publish)" scope
+        "publish-public": "vsce publish --pat ${PAT} --pre-release",
+        //
+        "build": "tsc -p ./",
+        //
+        "increment-version": "node ./scripts/increment-version.mjs",
+        "package": "deno task increment-version && vsce package --pre-release -o ./build/",
+        // attempts to uninstall and install the extension, doesnt fully work likly due to vscode profiles
+        "uninstall-extension": "code --uninstall-extension yggdrasil-au.bettergitvscode",
+        "install-extension": "node -e \"require('child_process').execSync('code --install-extension ./build/bettergitvscode-' + require('./package.json').version + '.vsix', {stdio: 'inherit'})\""
+    }
+}

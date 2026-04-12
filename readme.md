@@ -7,7 +7,7 @@ A Visual Studio Code extension that provides a simplified interface for Git, pow
 *   **One-Click Save:** Save your work with a message and choose a version increment (Patch, Minor, Major).
 *   **Safe Undo/Redo:** Revert changes without fear of losing code.
 *   **File History:** View and restore previous versions of files.
-*   **Node.js Support:** Automatically initializes and updates `package.json` versions.
+*   **Web Project Support:** Automatically initializes and updates `package.json`, `deno.json`, and `deno.jsonc` versions.
 *   **Remote Mirrors:** Add manually managed mirror remotes directly from the Remotes section.
 
 ## Configuration

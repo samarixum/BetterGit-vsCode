@@ -564,6 +564,10 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                     const initNodeItem = new BetterGitItem("Initialize Node Repository", vscode.TreeItemCollapsibleState.None, 'action', '');
                     initNodeItem.command = { command: 'bettersourcecontrol.initNode', title: 'Initialize Node', arguments: [repoPath] };
                     items.push(initNodeItem);
+
+                    const initDenoItem = new BetterGitItem("Initialize Deno Repository", vscode.TreeItemCollapsibleState.None, 'action', '');
+                    initDenoItem.command = { command: 'bettersourcecontrol.initDeno', title: 'Initialize Deno', arguments: [repoPath] };
+                    items.push(initDenoItem);
                 } else {
                     const hasActiveChanges = Array.isArray(data.changes) && data.changes.length > 0;
                     const aheadBy = typeof data.publish?.aheadBy === 'number' ? data.publish.aheadBy : 0;

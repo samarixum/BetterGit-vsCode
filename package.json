@@ -2,7 +2,7 @@
     "name": "bettergitvscode",
     "displayName": "BetterGitVSCode",
     "description": "Simplified, non-destructive version control.",
-    "version": "0.4.10",
+    "version": "0.4.13",
     "engines": {
         "vscode": "^1.110.0"
     },
@@ -17,8 +17,7 @@
         "production": "pnpm run build && pnpm run package",
         "publish-public": "vsce publish --pat ${PAT} --pre-release",
         "build": "tsc -p ./",
-        "increment-version": "node ./scripts/increment-version.mjs",
-        "package": "pnpm run increment-version && vsce package --pre-release -o ./build/",
+        "package": "vsce package --pre-release -o ./build/",
         "uninstall-extension": "code --uninstall-extension yggdrasil-au.bettergitvscode",
         "install-extension": "node -e \"require('child_process').execSync('code --install-extension ./build/bettergitvscode-' + require('./package.json').version + '.vsix', {stdio: 'inherit'})\""
     },
@@ -90,6 +89,11 @@
             {
                 "command": "bettersourcecontrol.initNode",
                 "title": "Initialize Node Repository",
+                "icon": "$(repo)"
+            },
+            {
+                "command": "bettersourcecontrol.initDeno",
+                "title": "Initialize Deno Repository",
                 "icon": "$(repo)"
             },
             {
@@ -191,8 +195,8 @@
         }
     },
     "devDependencies": {
-        "@types/node": "25.5.2",
-        "@types/vscode": "1.110.0",
+        "@types/node": "25.6.0",
+        "@types/vscode": "^1.110.0",
         "@vscode/vsce": "3.7.1",
         "typescript": "6.0.2"
     }

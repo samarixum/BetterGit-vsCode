@@ -331,7 +331,7 @@ export function activate(context: vscode.ExtensionContext) {
                 title: 'Publishing to all remotes...'
             },
             async () => {
-                await runBetterGitCommand('publish', [], targetPath, providerPath(context), betterGitProvider);
+                await runBetterGitCommandStreaming('publish', [], targetPath, providerPath(context), betterGitProvider);
             }
         );
     });
@@ -373,6 +373,26 @@ export function activate(context: vscode.ExtensionContext) {
             .then(folders => {
                 if (folders && folders[0]) {
                     runBetterGitCommand('init', [folders[0].fsPath, '--node'], folders[0].fsPath, providerPath(context), betterGitProvider);
+                }
+            });
+    });
+
+    // --- NEW: INIT DENO ---
+    vscode.commands.registerCommand('bettersourcecontrol.initDeno', (repoPath?: string) => {
+        if (repoPath) {
+            runBetterGitCommand('init', [repoPath, '--deno'], repoPath, providerPath(context), betterGitProvider);
+            return;
+        }
+
+        if (rootPath) {
+            runBetterGitCommand('init', [rootPath, '--deno'], rootPath, providerPath(context), betterGitProvider);
+            return;
+        }
+
+        vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false })
+            .then(folders => {
+                if (folders && folders[0]) {
+                    runBetterGitCommand('init', [folders[0].fsPath, '--deno'], folders[0].fsPath, providerPath(context), betterGitProvider);
                 }
             });
     });
@@ -632,6 +652,94 @@ function runBetterGitCommand(command: string, args: string[], cwd: string | unde
                 await refreshTreePreservingUiState(provider);
                 resolve();
             }
+        });
+    });
+}
+
+function runBetterGitCommandStreaming(command: string, args: string[], cwd: string | undefined, extPath: string, provider: BetterGitTreeProvider): Promise<void> {
+    if (!cwd) {
+        if (command !== 'init') return Promise.resolve();
+    }
+
+    const config = vscode.workspace.getConfiguration('bettergit');
+    let exePath = config.get<string>('executablePath');
+
+    if (!exePath) {
+        outputChannel.appendLine(`[ERROR] BetterGit executable path is not configured. Please set "bettergit.executablePath" in settings.`);
+        vscode.window.showErrorMessage('BetterGit executable path is not configured. Please set "bettergit.executablePath" in settings.');
+        return Promise.resolve();
+    }
+
+    if (exePath.startsWith('"') && exePath.endsWith('"')) {
+        exePath = exePath.substring(1, exePath.length - 1);
+    }
+
+    outputChannel.show(true);
+    outputChannel.appendLine(`[${new Date().toISOString()}] Running: ${command} ${args.join(' ')}${cwd ? ` (in ${cwd})` : ''}`);
+
+    return new Promise<void>((resolve) => {
+        const child = cp.spawn(exePath, [command, ...args], {
+            cwd: cwd,
+            windowsHide: true
+        });
+
+        let stdoutBuffer = '';
+        let stderrBuffer = '';
+        let completed = false;
+
+        const appendChunk = (buffer: string, chunk: string, prefix: string): string => {
+            const text = buffer + chunk;
+            const lines = text.split(/\r?\n/);
+            const remainder = lines.pop() ?? '';
+
+            for (const line of lines) {
+                if (line.length > 0) {
+                    outputChannel.appendLine(`${prefix}${line}`);
+                }
+            }
+
+            return remainder;
+        };
+
+        child.stdout?.setEncoding('utf8');
+        child.stderr?.setEncoding('utf8');
+
+        child.stdout?.on('data', (chunk: string) => {
+            stdoutBuffer = appendChunk(stdoutBuffer, chunk, '[OUTPUT] ');
+        });
+
+        child.stderr?.on('data', (chunk: string) => {
+            stderrBuffer = appendChunk(stderrBuffer, chunk, '[STDERR] ');
+        });
+
+        child.on('error', async error => {
+            if (completed) return;
+            completed = true;
+            outputChannel.appendLine(`[ERROR] Failed to start BetterGit: ${error.message}`);
+            vscode.window.showErrorMessage(`BetterGit Error: ${error.message}`);
+            await refreshTreePreservingUiState(provider);
+            resolve();
+        });
+
+        child.on('close', async code => {
+            if (completed) return;
+            completed = true;
+            if (stdoutBuffer.trim().length > 0) {
+                outputChannel.appendLine(`[OUTPUT] ${stdoutBuffer.trim()}`);
+            }
+            if (stderrBuffer.trim().length > 0) {
+                outputChannel.appendLine(`[STDERR] ${stderrBuffer.trim()}`);
+            }
+
+            if (code === 0) {
+                outputChannel.appendLine('[INFO] Publish completed.');
+            } else {
+                outputChannel.appendLine(`[ERROR] BetterGit publish exited with code ${code ?? 'unknown'}`);
+                vscode.window.showErrorMessage(`BetterGit publish failed with exit code ${code ?? 'unknown'}.`);
+            }
+
+            await refreshTreePreservingUiState(provider);
+            resolve();
         });
     });
 }
